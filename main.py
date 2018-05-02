@@ -22,6 +22,8 @@ parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
 parser.add_argument('--batchsize', '-b', default=128, type=int, help='Training batch size')
+parser.add_argument('--maxbatches', '-B', default=None, type=int, help='Max number of batches per epoch')
+
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -85,6 +87,11 @@ def train(epoch):
     train_loss = 0
     correct = 0
     total = 0
+
+    num_batches = len(trainloader)
+    if args.maxbatches:
+        num_batches = args.maxbatches
+
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
@@ -98,8 +105,12 @@ def train(epoch):
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+        progress_bar(batch_idx, num_batches, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+
+        if batch_idx+1 >= num_batches:
+            break
+
 
 def test(epoch):
     global best_acc
@@ -107,6 +118,11 @@ def test(epoch):
     test_loss = 0
     correct = 0
     total = 0
+
+    num_batches = len(testloader)
+    if args.maxbatches:
+        num_batches = args.maxbatches
+
     for batch_idx, (inputs, targets) in enumerate(testloader):
         inputs, targets = inputs.to(device), targets.to(device)
         outputs = net(inputs)
@@ -117,8 +133,11 @@ def test(epoch):
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-        progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+        progress_bar(batch_idx, num_batches, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+
+        if batch_idx+1 >= num_batches:
+            break
 
     # Save checkpoint.
     acc = 100.*correct/total
