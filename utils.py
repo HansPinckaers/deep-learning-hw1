@@ -8,6 +8,7 @@ import sys
 import time
 import math
 
+import torch
 import torch.nn as nn
 import torch.nn.init as init
 
@@ -42,12 +43,20 @@ def init_params(net):
                 init.constant(m.bias, 0)
 
 
-_, term_width = os.popen('stty size', 'r').read().split()
-term_width = int(term_width)
+stty_pipe = os.popen('stty size', 'r')
+stty_output = stty_pipe.read()
+if len(stty_output) > 0:
+    _, term_width = stty_output.split()
+    term_width = int(term_width)
+else:
+    # Set a default in case we couldn't read the term width
+    term_width = 100
 
 TOTAL_BAR_LENGTH = 65.
 last_time = time.time()
 begin_time = last_time
+
+
 def progress_bar(current, total, msg=None):
     global last_time, begin_time
     if current == 0:
