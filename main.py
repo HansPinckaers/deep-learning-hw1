@@ -16,9 +16,14 @@ from utils import progress_bar
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
-parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-parser.add_argument('--batchsize', '-b', default=128, type=int, help='Training batch size')
-parser.add_argument('--maxbatches', '-B', default=None, type=int, help='Max number of batches per epoch')
+parser.add_argument('--resume', '-r', action='store_true',
+                    help='resume from checkpoint')
+parser.add_argument('--batchsize', '-b', default=128, type=int,
+                    help='Training batch size')
+parser.add_argument('--maxbatches', '-B', default=None, type=int,
+                    help='Max number of batches per epoch')
+parser.add_argument('--model', '-m', default='VGG16', type=str,
+                    help='Model name')
 
 args = parser.parse_args()
 
@@ -47,18 +52,26 @@ testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True
 testloader = torch.utils.data.DataLoader(testset, batch_size=args.batchsize, shuffle=False, num_workers=2)
 
 # Model
+model_name = args.model
+models = {
+    'VGG16': lambda: VGG('VGG16'),
+    'ResNet18': lambda: ResNet18(),
+    'PreActResNet18': lambda: PreActResNet18(),
+    'GoogLeNet': lambda: GoogLeNet(),
+    'DenseNet121': lambda: DenseNet121(),
+    'ResNeXt29_2x64d': lambda: ResNeXt29_2x64d(),
+    'MobileNet': lambda: MobileNet(),
+    'MobileNetV2': lambda: MobileNetV2(),
+    'DPN92': lambda: DPN92(),
+    'ShuffleNetG2': lambda: ShuffleNetG2(),
+    'SENet18': lambda: SENet18(),
+}
+
 print('==> Building model..')
-# net = VGG('VGG19')
-net = ResNet18()
-# net = PreActResNet18()
-# net = GoogLeNet()
-# net = DenseNet121()
-# net = ResNeXt29_2x64d()
-# net = MobileNet()
-# net = MobileNetV2()
-# net = DPN92()
-# net = ShuffleNetG2()
-# net = SENet18()
+if model_name not in models:
+    raise ValueError("Invalid model name %s" % model_name)
+
+net = models[model_name]()
 net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
@@ -66,9 +79,7 @@ if device == 'cuda':
 
 print(net)
 
-
-net_name = type(net).__name__
-checkpoint_filename = './checkpoint/ckpt.%s.t7' % net_name
+checkpoint_filename = './checkpoint/ckpt.%s.t7' % model_name
 if not os.path.isdir('checkpoint'):
     os.mkdir('checkpoint')
 if args.resume:
@@ -82,6 +93,7 @@ if args.resume:
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+
 
 # Training
 def train(epoch):
@@ -109,9 +121,10 @@ def train(epoch):
         correct += predicted.eq(targets).sum().item()
 
         progress_bar(batch_idx, num_batches, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+                     % (train_loss / (batch_idx + 1), 100. * correct / total,
+                        correct, total))
 
-        if batch_idx+1 >= num_batches:
+        if batch_idx + 1 >= num_batches:
             break
 
 
@@ -137,13 +150,14 @@ def test(epoch):
         correct += predicted.eq(targets).sum().item()
 
         progress_bar(batch_idx, num_batches, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+                     % (test_loss / (batch_idx + 1), 100. * correct / total,
+                        correct, total))
 
-        if batch_idx+1 >= num_batches:
+        if batch_idx + 1 >= num_batches:
             break
 
     # Save checkpoint.
-    acc = 100.*correct/total
+    acc = 100. * correct / total
     if acc > best_acc:
         print('Saving %s..' % checkpoint_filename)
         state = {
@@ -157,6 +171,8 @@ def test(epoch):
 
 
 
-for epoch in range(start_epoch, start_epoch+200):
+
+# Train the model
+for epoch in range(start_epoch, start_epoch + 200):
     train(epoch)
     test(epoch)
