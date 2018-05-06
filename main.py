@@ -70,11 +70,16 @@ if device == 'cuda':
 
 print(net)
 
+
+net_name = type(net).__name__
+checkpoint_filename = './checkpoint/ckpt.%s.t7' % net_name
+if not os.path.isdir('checkpoint'):
+    os.mkdir('checkpoint')
 if args.resume:
     # Load checkpoint.
-    print('==> Resuming from checkpoint..')
-    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/ckpt.t7')
+    print('==> Resuming from checkpoint %s..' % checkpoint_filename)
+    assert os.path.isfile(checkpoint_filename), 'Error: no checkpoint found!'
+    checkpoint = torch.load(checkpoint_filename)
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
@@ -144,19 +149,16 @@ def test(epoch):
     # Save checkpoint.
     acc = 100.*correct/total
     if acc > best_acc:
-        print('Saving..')
+        print('Saving %s..' % checkpoint_filename)
         state = {
             'net': net.state_dict(),
             'acc': acc,
             'epoch': epoch,
         }
-
-        if not os.path.isdir('checkpoint'):
-            os.mkdir('checkpoint')
-
-        checkpoint_filename = 'ckpt.%s.t7' % type(net).__name__
-        torch.save(state, './checkpoint/%s' % checkpoint_filename)
+        torch.save(state, checkpoint_filename)
         best_acc = acc
+
+
 
 
 for epoch in range(start_epoch, start_epoch+200):
