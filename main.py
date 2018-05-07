@@ -74,7 +74,11 @@ if model_name not in models:
 net = models[model_name]()
 net = net.to(device)
 if device == 'cuda':
-    net = torch.nn.DataParallel(net)
+    cuda_device_count = torch.cuda.device_count()
+    print("Using %d GPUs" % cuda_device_count)
+    if cuda_device_count > 1:
+        # DataParallel causes pytorch to use multiple GPUs
+        net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
 print(net)
