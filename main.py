@@ -14,6 +14,7 @@ from models import *
 from utils import progress_bar
 
 
+# Arguments
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float,
                     help='learning rate')
@@ -27,6 +28,8 @@ parser.add_argument('--maxbatches', '-B', default=None, type=int,
                     help='Max number of batches per epoch')
 parser.add_argument('--model', '-m', default='VGG16', type=str,
                     help='Model name')
+parser.add_argument('--optimizer', '-o', default='SGD', type=str,
+                    help='Optimization Algorithm')
 
 args = parser.parse_args()
 
@@ -98,12 +101,25 @@ if args.resume:
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
 
+# Loss
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(net.parameters(),
-                      lr=args.lr,
-                      momentum=args.momentum,
-                      weight_decay=5e-4)
 
+# Optimization algorithm
+optimizers = {
+    'SGD': lambda: optim.SGD(net.parameters(),
+                             lr=args.lr,
+                             momentum=args.momentum,
+                             weight_decay=5e-4),
+    'Adam': lambda: optim.Adam(net.parameters(), lr=args.lr),
+}
+
+optimizer_name = args.optimizer
+if optimizer_name not in optimizers:
+    raise ValueError("Invalid optimizer name %s" % optimizer_name)
+
+print("==> Building optimizer %s.." % optimizer_name)
+optimizer = optimizers[args.optimizer]()
+print(optimizer)
 
 # Training
 def train(epoch):
