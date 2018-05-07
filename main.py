@@ -13,7 +13,15 @@ from torch.utils.data import DataLoader
 from models import *
 from utils import progress_bar
 
+import json
+
+import functools
+import sys
+import multiprocessing as mp
+import signal
+
 CHECKPOINT_DIR = 'checkpoint'
+OUTPUT_DATA_FILENAME = 'out.json'
 
 # Arguments
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
@@ -127,11 +135,15 @@ print("==> Building optimizer %s.." % optimizer_name)
 optimizer = optimizers[args.optimizer]()
 print(optimizer)
 
+optimizer_params = optimizer.param_groups[0].copy()
+del(optimizer_params['params'])
+
+
 # Training
 def train(epoch):
     print('\nEpoch: %d' % epoch)
     net.train()
-    train_loss = 0
+    total_loss = 0
     correct = 0
     total = 0
 
@@ -147,23 +159,29 @@ def train(epoch):
         loss.backward()
         optimizer.step()
 
-        train_loss += loss.item()
+        total_loss += loss.item()
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-        progress_bar(batch_idx, num_batches, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (train_loss / (batch_idx + 1), 100. * correct / total,
-                        correct, total))
+        avg_loss = total_loss / (batch_idx + 1)
+        accuracy = 100. * correct / total
+
+        progress_bar(batch_idx, num_batches,
+                     'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                     % (avg_loss, accuracy, correct, total)
+                     )
 
         if batch_idx + 1 >= num_batches:
             break
+
+    return avg_loss, accuracy
 
 
 def test(epoch):
     global best_acc
     net.eval()
-    test_loss = 0
+    total_loss = 0
     correct = 0
     total = 0
 
@@ -176,32 +194,81 @@ def test(epoch):
         outputs = net(inputs)
         loss = criterion(outputs, targets)
 
-        test_loss += loss.item()
+        total_loss += loss.item()
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-        progress_bar(batch_idx, num_batches, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (test_loss / (batch_idx + 1), 100. * correct / total,
-                        correct, total))
+        avg_loss = total_loss / (batch_idx + 1)
+        accuracy = 100. * correct / total
+
+        progress_bar(batch_idx, num_batches,
+                     'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                     % (avg_loss, accuracy, correct, total)
+                     )
 
         if batch_idx + 1 >= num_batches:
             break
 
     # Save checkpoint.
-    acc = 100. * correct / total
-    if acc > best_acc:
+    if accuracy > best_acc:
         print('Saving %s..' % checkpoint_filename)
         state = {
             'net': net.state_dict(),
-            'acc': acc,
+            'acc': accuracy,
             'epoch': epoch,
         }
         torch.save(state, checkpoint_filename)
-        best_acc = acc
+        best_acc = accuracy
+
+    return avg_loss, accuracy
 
 
-# Train the model
-for epoch in range(start_epoch, start_epoch + 200):
-    train(epoch)
-    test(epoch)
+if __name__ == "__main__":
+
+    output_data = {
+        "model": model_name,
+        "optimizer": {
+            "name": optimizer_name,
+            "params": optimizer_params,
+        },
+        "train_loss": [],
+        "train_acc": [],
+        "test_loss": [],
+        "test_acc": [],
+    }
+
+    def write_output():
+        # Load output file
+        if os.path.isfile(OUTPUT_DATA_FILENAME):
+            with open(OUTPUT_DATA_FILENAME, mode='r', encoding='utf-8') as f:
+                all_output_data = json.load(f)
+        else:
+            all_output_data = []
+
+        # Add new data and write to file
+        all_output_data.append(output_data)
+        with open(OUTPUT_DATA_FILENAME, mode='w', encoding='utf-8') as f:
+            json.dump(all_output_data, f)
+
+
+    def sigint_handler(signal, frame, process_lock):
+        if process_lock.acquire(timeout=1):
+            print("\n\nWriting output to %s" % OUTPUT_DATA_FILENAME)
+            write_output()
+        sys.exit(0)
+
+
+    # Setup handler for CTRL-C
+    signal.signal(signal.SIGINT,
+                  functools.partial(sigint_handler, process_lock=mp.Lock()))
+
+    # Train the model
+    for epoch in range(start_epoch, start_epoch + 200):
+        train_loss, train_acc = train(epoch)
+        test_loss, test_acc = test(epoch)
+
+        output_data["train_loss"].append([epoch, train_loss])
+        output_data["train_acc"].append([epoch, train_acc])
+        output_data["test_loss"].append([epoch, test_loss])
+        output_data["test_acc"].append([epoch, test_acc])
