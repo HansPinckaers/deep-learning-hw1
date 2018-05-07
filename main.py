@@ -2,7 +2,10 @@
 from __future__ import print_function
 
 import argparse
+import json
 import os
+import signal
+import sys
 
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
@@ -12,13 +15,6 @@ from torch.utils.data import DataLoader
 
 from models import *
 from utils import progress_bar
-
-import json
-
-import functools
-import sys
-import multiprocessing as mp
-import signal
 
 CHECKPOINT_DIR = 'checkpoint'
 OUTPUT_DATA_FILENAME = 'out.json'
@@ -138,7 +134,7 @@ optimizer = optimizers[args.optimizer]()
 print(optimizer)
 
 optimizer_params = optimizer.param_groups[0].copy()
-del(optimizer_params['params'])
+del (optimizer_params['params'])
 
 
 # Training
@@ -214,8 +210,27 @@ def test():
     return avg_loss, accuracy
 
 
-if __name__ == "__main__":
+def write_output(data):
+    print("\nWriting output to %s" % OUTPUT_DATA_FILENAME)
+    # Load output file
+    if os.path.isfile(OUTPUT_DATA_FILENAME):
+        with open(OUTPUT_DATA_FILENAME, mode='r', encoding='utf-8') as f:
+            all_output_data = json.load(f)
+    else:
+        all_output_data = []
 
+    # Add new data and write to file
+    all_output_data.append(data)
+    with open(OUTPUT_DATA_FILENAME, mode='w', encoding='utf-8') as f:
+        json.dump(all_output_data, f)
+
+
+# Gracefully handle CTRL-C (SIGTERM)
+signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
+
+
+# Main loop
+if __name__ == "__main__":
     output_data = {
         "model": model_name,
         "optimizer": {
@@ -228,51 +243,29 @@ if __name__ == "__main__":
         "test_acc": [],
     }
 
-    def write_output():
-        # Load output file
-        if os.path.isfile(OUTPUT_DATA_FILENAME):
-            with open(OUTPUT_DATA_FILENAME, mode='r', encoding='utf-8') as f:
-                all_output_data = json.load(f)
-        else:
-            all_output_data = []
+    try:
+        for epoch in range(start_epoch, start_epoch + args.epochs):
+            print('\nEpoch %d/%d' % (epoch+1, args.epochs))
 
-        # Add new data and write to file
-        all_output_data.append(output_data)
-        with open(OUTPUT_DATA_FILENAME, mode='w', encoding='utf-8') as f:
-            json.dump(all_output_data, f)
+            train_loss, train_acc = train()
+            test_loss, test_acc = test()
 
+            output_data["train_loss"].append([epoch, train_loss])
+            output_data["train_acc"].append([epoch, train_acc])
+            output_data["test_loss"].append([epoch, test_loss])
+            output_data["test_acc"].append([epoch, test_acc])
 
-    def sigint_handler(signal, frame, process_lock):
-        if process_lock.acquire(timeout=1):
-            print("\n\nWriting output to %s" % OUTPUT_DATA_FILENAME)
-            write_output()
-        sys.exit(0)
+            # Save checkpoint
+            if test_acc > best_acc:
+                print('Saving checkpoint %s..' % checkpoint_filename)
+                state = {
+                    'net': net.state_dict(),
+                    'acc': test_acc,
+                    'epoch': epoch,
+                }
+                torch.save(state, checkpoint_filename)
+                best_acc = test_acc
+    finally:
+        write_output(output_data)
 
-
-    # Setup handler for CTRL-C
-    signal.signal(signal.SIGINT,
-                  functools.partial(sigint_handler, process_lock=mp.Lock()))
-
-    # Train the model
-    for epoch in range(start_epoch, start_epoch + args.epochs):
-        print('\nEpoch %d/%d' % (epoch, args.epochs))
-
-        train_loss, train_acc = train()
-        test_loss, test_acc = test()
-
-        output_data["train_loss"].append([epoch, train_loss])
-        output_data["train_acc"].append([epoch, train_acc])
-        output_data["test_loss"].append([epoch, test_loss])
-        output_data["test_acc"].append([epoch, test_acc])
-
-        # Save checkpoint
-        if test_acc > best_acc:
-            print('Saving checkpoint %s..' % checkpoint_filename)
-            state = {
-                'net': net.state_dict(),
-                'acc': test_acc,
-                'epoch': epoch,
-            }
-            torch.save(state, checkpoint_filename)
-            best_acc = test_acc
 
