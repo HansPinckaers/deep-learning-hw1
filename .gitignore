@@ -3,6 +3,7 @@
 data/
 checkpoint/
 .idea/
+out.json
 
 # Created by https://www.gitignore.io/api/python,pycharm,osx
 
