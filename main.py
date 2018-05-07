@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from models import *
 from utils import progress_bar
 
+CHECKPOINT_DIR = 'checkpoint'
 
 # Arguments
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
@@ -33,10 +34,6 @@ parser.add_argument('--optimizer', '-o', default='SGD', type=str,
 
 args = parser.parse_args()
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-best_acc = 0  # best test accuracy
-start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-
 # Data
 print('==> Preparing data..')
 transform_train = transforms.Compose([
@@ -51,11 +48,15 @@ transform_test = transforms.Compose([
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batchsize, shuffle=True, num_workers=2)
+trainset = torchvision.datasets.CIFAR10(
+    root='./data', train=True, download=True, transform=transform_train)
+trainloader = torch.utils.data.DataLoader(
+    trainset, batch_size=args.batchsize, shuffle=True, num_workers=2)
 
-testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
-testloader = torch.utils.data.DataLoader(testset, batch_size=args.batchsize, shuffle=False, num_workers=2)
+testset = torchvision.datasets.CIFAR10(
+    root='./data', train=False, download=True, transform=transform_test)
+testloader = torch.utils.data.DataLoader(
+    testset, batch_size=args.batchsize, shuffle=False, num_workers=2)
 
 # Model
 model_name = args.model
@@ -73,11 +74,13 @@ models = {
     'SENet18': lambda: SENet18(),
 }
 
-print('==> Building model..')
 if model_name not in models:
     raise ValueError("Invalid model name %s" % model_name)
 
+print("==> Building model %s.." % model_name)
 net = models[model_name]()
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 net = net.to(device)
 if device == 'cuda':
     cuda_device_count = torch.cuda.device_count()
@@ -89,11 +92,14 @@ if device == 'cuda':
 
 print(net)
 
-checkpoint_filename = './checkpoint/ckpt.%s.t7' % model_name
-if not os.path.isdir('checkpoint'):
-    os.mkdir('checkpoint')
+# Load checkpoint
+checkpoint_filename = './%s/ckpt.%s.t7' % (CHECKPOINT_DIR, model_name)
+best_acc = 0  # best test accuracy
+start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+
+if not os.path.isdir(CHECKPOINT_DIR):
+    os.mkdir(CHECKPOINT_DIR)
 if args.resume:
-    # Load checkpoint.
     print('==> Resuming from checkpoint %s..' % checkpoint_filename)
     assert os.path.isfile(checkpoint_filename), 'Error: no checkpoint found!'
     checkpoint = torch.load(checkpoint_filename)
@@ -193,9 +199,6 @@ def test(epoch):
         }
         torch.save(state, checkpoint_filename)
         best_acc = acc
-
-
-
 
 
 # Train the model
