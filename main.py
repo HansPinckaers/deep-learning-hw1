@@ -15,7 +15,10 @@ from utils import progress_bar
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
+parser.add_argument('--lr', default=0.1, type=float,
+                    help='learning rate')
+parser.add_argument('--momentum', default=0.9, type=float,
+                    help='SGD momentum')
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--batchsize', '-b', default=128, type=int,
@@ -96,7 +99,10 @@ if args.resume:
     start_epoch = checkpoint['epoch']
 
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+optimizer = optim.SGD(net.parameters(),
+                      lr=args.lr,
+                      momentum=args.momentum,
+                      weight_decay=5e-4)
 
 
 # Training
