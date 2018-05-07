@@ -142,8 +142,7 @@ del(optimizer_params['params'])
 
 
 # Training
-def train(epoch):
-    print('\nEpoch: %d' % epoch)
+def train():
     net.train()
     total_loss = 0
     correct = 0
@@ -180,7 +179,7 @@ def train(epoch):
     return avg_loss, accuracy
 
 
-def test(epoch):
+def test():
     global best_acc
     net.eval()
     total_loss = 0
@@ -211,17 +210,6 @@ def test(epoch):
 
         if batch_idx + 1 >= num_batches:
             break
-
-    # Save checkpoint.
-    if accuracy > best_acc:
-        print('Saving %s..' % checkpoint_filename)
-        state = {
-            'net': net.state_dict(),
-            'acc': accuracy,
-            'epoch': epoch,
-        }
-        torch.save(state, checkpoint_filename)
-        best_acc = accuracy
 
     return avg_loss, accuracy
 
@@ -267,10 +255,24 @@ if __name__ == "__main__":
 
     # Train the model
     for epoch in range(start_epoch, start_epoch + args.epochs):
-        train_loss, train_acc = train(epoch)
-        test_loss, test_acc = test(epoch)
+        print('\nEpoch %d/%d' % (epoch, args.epochs))
+
+        train_loss, train_acc = train()
+        test_loss, test_acc = test()
 
         output_data["train_loss"].append([epoch, train_loss])
         output_data["train_acc"].append([epoch, train_acc])
         output_data["test_loss"].append([epoch, test_loss])
         output_data["test_acc"].append([epoch, test_acc])
+
+        # Save checkpoint
+        if test_acc > best_acc:
+            print('Saving checkpoint %s..' % checkpoint_filename)
+            state = {
+                'net': net.state_dict(),
+                'acc': test_acc,
+                'epoch': epoch,
+            }
+            torch.save(state, checkpoint_filename)
+            best_acc = test_acc
+
