@@ -35,6 +35,8 @@ parser.add_argument('--batchsize', '-b', default=128, type=int,
                     help='Training batch size')
 parser.add_argument('--maxbatches', '-B', default=None, type=int,
                     help='Max number of batches per epoch')
+parser.add_argument('--epochs', '-e', default=200, type=int,
+                    help='Number of epochs to run')
 parser.add_argument('--model', '-m', default='VGG16', type=str,
                     help='Model name')
 parser.add_argument('--optimizer', '-o', default='SGD', type=str,
@@ -264,7 +266,7 @@ if __name__ == "__main__":
                   functools.partial(sigint_handler, process_lock=mp.Lock()))
 
     # Train the model
-    for epoch in range(start_epoch, start_epoch + 200):
+    for epoch in range(start_epoch, start_epoch + args.epochs):
         train_loss, train_acc = train(epoch)
         test_loss, test_acc = test(epoch)
 
