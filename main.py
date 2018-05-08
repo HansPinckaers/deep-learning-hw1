@@ -17,7 +17,7 @@ from models import *
 from utils import progress_bar
 
 CHECKPOINT_DIR = 'checkpoint'
-OUTPUT_DATA_FILENAME = 'out.json'
+OUTPUT_DIR = 'out'
 
 # Arguments
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
@@ -37,6 +37,8 @@ parser.add_argument('--model', '-m', default='VGG16', type=str,
                     help='Model name')
 parser.add_argument('--optimizer', '-o', default='SGD', type=str,
                     help='Optimization Algorithm')
+parser.add_argument('--out', '-O', default=None, type=str,
+                    help='Output file name')
 
 args = parser.parse_args()
 
@@ -99,12 +101,12 @@ if device == 'cuda':
 print(net)
 
 # Load checkpoint
-checkpoint_filename = './%s/ckpt.%s.t7' % (CHECKPOINT_DIR, model_name)
+checkpoint_filename = '%s/ckpt.%s.t7' % (CHECKPOINT_DIR, model_name)
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
 if not os.path.isdir(CHECKPOINT_DIR):
-    os.mkdir(CHECKPOINT_DIR)
+    os.makedirs(CHECKPOINT_DIR)
 if args.resume:
     print('==> Resuming from checkpoint %s..' % checkpoint_filename)
     assert os.path.isfile(checkpoint_filename), 'Error: no checkpoint found!'
@@ -211,17 +213,28 @@ def test():
 
 
 def write_output(data):
-    print("\nWriting output to %s" % OUTPUT_DATA_FILENAME)
+    if not os.path.isdir(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+
+    if not args.out:
+        output_filename = "%s-%s_%.2f_%.2f" %\
+                          (model_name, optimizer_name, args.lr, args.momentum)
+    else:
+        output_filename = args.out
+
+    output_filepath = "%s/%s.json" % (OUTPUT_DIR, output_filename)
+
+    print("\nWriting output to %s" % output_filepath)
     # Load output file
-    if os.path.isfile(OUTPUT_DATA_FILENAME):
-        with open(OUTPUT_DATA_FILENAME, mode='r', encoding='utf-8') as f:
+    if os.path.isfile(output_filepath):
+        with open(output_filepath, mode='r', encoding='utf-8') as f:
             all_output_data = json.load(f)
     else:
         all_output_data = []
 
     # Add new data and write to file
     all_output_data.append(data)
-    with open(OUTPUT_DATA_FILENAME, mode='w', encoding='utf-8') as f:
+    with open(output_filepath, mode='w', encoding='utf-8') as f:
         json.dump(all_output_data, f)
 
 
