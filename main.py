@@ -71,6 +71,8 @@ model_name = args.model
 models = {
     'VGG16': lambda: VGG('VGG16'),
     'ResNet18': lambda: ResNet18(),
+    'VGG16_NBN': lambda: VGG_NBN('VGG16'),
+    'ResNet18_NBN': lambda: ResNet18_NBN(),
     'PreActResNet18': lambda: PreActResNet18(),
     'GoogLeNet': lambda: GoogLeNet(),
     'DenseNet121': lambda: DenseNet121(),

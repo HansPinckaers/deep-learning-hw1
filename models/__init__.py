@@ -1,4 +1,5 @@
 from .vgg import *
+from .vgg_nbn import *
 from .dpn import *
 from .lenet import *
 from .senet import *
@@ -7,6 +8,7 @@ from .densenet import *
 from .googlenet import *
 from .shufflenet import *
 from .resnet import *
+from .resnet_nbn import *
 from .resnext import *
 from .preact_resnet import *
 from .mobilenet import *
