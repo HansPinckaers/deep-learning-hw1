@@ -257,8 +257,9 @@ if __name__ == "__main__":
     }
 
     try:
-        for epoch in range(start_epoch, start_epoch + args.epochs):
-            print('\nEpoch %d/%d' % (epoch+1, args.epochs))
+        end_epoch = start_epoch + args.epochs
+        for epoch in range(start_epoch, end_epoch):
+            print('\nEpoch %d/%d' % (epoch+1, end_epoch))
 
             train_loss, train_acc = train()
             test_loss, test_acc = test()
