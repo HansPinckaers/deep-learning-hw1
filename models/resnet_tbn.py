@@ -40,7 +40,7 @@ class AsyncBatchNorm(torch.autograd.Function):
         input, beta, gamma = ctx.saved_tensors
 
         dy = grad_output
-        N = input.shape[1]
+        N = input.shape[0]
         eps = 1e-5
 
         mu = 1/N * torch.sum(input, dim=0)  # Size (H,) maybe torch.mean is faster
@@ -65,13 +65,12 @@ class TrailingBatchNorm(torch.nn.Module):
         self.temp_running_mean = 0
         self.temp_running_variance = 0
 
-        self.gamma = torch.Tensor([1.])
-        self.beta = torch.Tensor([0.])
+        self.gamma = torch.Tensor([1.]).cuda()
+        self.beta = torch.Tensor([0.]).cuda()
         self.eps = 1e-5
-        self.momentum = 0.1  # uses the same momentum definition as pytorch batchnorm
+        self.momentum = 0.5  # uses the same momentum definition as pytorch batchnorm
 
-        self.register_backward_hook(self.backward_hook)
-        self.first = True
+        self.first = 0
 
     def forward(self, x):
         if x.dim() == 4:
@@ -79,43 +78,37 @@ class TrailingBatchNorm(torch.nn.Module):
         else:
             return self.batchnorm_forward(x, self.gamma, self.beta)
 
-    def backward_hook(self, module, grad_input, grad_output):
-#         self.running_mean = self.temp_running_mean
-#         self.running_variance = self.temp_running_variance
-        return None
-
     def batchnorm_forward(self, x, gamma, beta):
-#         if self.running_mean is None:
-#             self.running_mean = torch.zeros(x.shape[1], dtype=x.dtype, requires_grad=False)
-#             self.running_variance = torch.zeros(x.shape[1], dtype=x.dtype, requires_grad=False)
+        if x.requires_grad:
+            self.running_mean = self.temp_running_mean
+            self.running_variance = self.temp_running_variance
 
-#         print(self.running_mean[0:10])
+        # if self.running_mean is None:
+        #     self.running_mean = torch.zeros(x.shape[1], dtype=x.dtype, requires_grad=False)
+        #     self.running_variance = torch.zeros(x.shape[1], dtype=x.dtype, requires_grad=False)
 
-#         running_mean = self.running_mean
-#         running_var = self.running_variance
-        weird_batchnorm = AsyncBatchNorm.apply
+        async_batchnorm = AsyncBatchNorm.apply
         momentum = self.momentum
         eps = self.eps
 
-#         if self.first:
-#             self.first = False
-#             out = x
-#         else:
-        sample_mean = torch.mean(x, dim=0).detach()  # we do not need to calculate gradients over mean/var
-        sample_var = torch.var(x, dim=0).detach()
-
+        if self.first < 782 * 3:
+            self.first += 1
+            out = x
+            if self.first == 1:
+                self.running_mean = torch.mean(x, dim=0).detach()
+                self.running_variance = torch.var(x, dim=0).detach()
+        else:
 #             x_normalized = (x - sample_mean) / torch.sqrt(sample_var + eps)
 #             out = gamma * x_normalized + beta
 
-        out = weird_batchnorm(x, self.beta, self.gamma, sample_mean, sample_var)
-#         out =
+            out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
 
         with torch.no_grad():
             sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
             sample_var = torch.var(x, dim=0)
 
-#             self.temp_running_mean = (1 - momentum) * running_mean +  momentum * sample_mean
-#             self.temp_running_variance = (1 - momentum) * running_var + momentum * sample_var
+            self.temp_running_mean = (1 - momentum) * self.running_mean +  momentum * sample_mean
+            self.temp_running_variance = (1 - momentum) * self.running_variance + momentum * sample_var
 
         return out
 
@@ -125,7 +118,7 @@ class TrailingBatchNorm(torch.nn.Module):
         out = self.batchnorm_forward(x_new, gamma, beta)
         out = out.reshape(N, H, W, C).permute(0, 3, 1, 2)
 
-        return out
+        return x
 
 class BasicBlock_TBN(nn.Module):
     expansion = 1
