@@ -64,15 +64,18 @@ trainloader = torch.utils.data.DataLoader(
 testset = torchvision.datasets.CIFAR10(
     root='./data', train=False, download=True, transform=transform_test)
 testloader = torch.utils.data.DataLoader(
-    testset, batch_size=args.batchsize, shuffle=False, num_workers=2)
+    testset, batch_size=32, shuffle=False, num_workers=2)
 
 # Model
 model_name = args.model
 models = {
     'VGG16': lambda: VGG('VGG16'),
     'ResNet18': lambda: ResNet18(),
+    'ResNet50': lambda: ResNet50(),
     'VGG16_NBN': lambda: VGG_NBN('VGG16'),
     'ResNet18_NBN': lambda: ResNet18_NBN(),
+    'ResNet50_NBN': lambda: ResNet50_NBN(),
+    'ResNet50_TBN': lambda: ResNet50_TBN(),
     'PreActResNet18': lambda: PreActResNet18(),
     'GoogLeNet': lambda: GoogLeNet(),
     'DenseNet121': lambda: DenseNet121(),
@@ -91,7 +94,7 @@ print("==> Building model %s.." % model_name)
 net = models[model_name]()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-net = net.to(device)
+net = net.cuda()
 if device == 'cuda':
     cuda_device_count = torch.cuda.device_count()
     print("Using %d GPUs" % cuda_device_count)
@@ -153,7 +156,7 @@ def train():
         num_batches = args.maxbatches
 
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+        inputs, targets = inputs.cuda(), targets.cuda()
         optimizer.zero_grad()
         outputs = net(inputs)
         loss = criterion(outputs, targets)
@@ -191,7 +194,7 @@ def test():
         num_batches = args.maxbatches
 
     for batch_idx, (inputs, targets) in enumerate(testloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+        inputs, targets = inputs.cuda(), targets.cuda()
         outputs = net(inputs)
         loss = criterion(outputs, targets)
 
