@@ -191,27 +191,27 @@ def test():
     num_batches = len(testloader)
     if args.maxbatches:
         num_batches = args.maxbatches
+    with torch.no_grad():
+        for batch_idx, (inputs, targets) in enumerate(testloader):
+            inputs, targets = inputs.cuda(), targets.cuda()
+            outputs = net(inputs)
+            loss = criterion(outputs, targets)
 
-    for batch_idx, (inputs, targets) in enumerate(testloader):
-        inputs, targets = inputs.cuda(), targets.cuda()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
+            total_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
 
-        total_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
+            avg_loss = total_loss / (batch_idx + 1)
+            accuracy = 100. * correct / total
 
-        avg_loss = total_loss / (batch_idx + 1)
-        accuracy = 100. * correct / total
+            progress_bar(batch_idx, num_batches,
+                         'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                         % (avg_loss, accuracy, correct, total)
+                         )
 
-        progress_bar(batch_idx, num_batches,
-                     'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (avg_loss, accuracy, correct, total)
-                     )
-
-        if batch_idx + 1 >= num_batches:
-            break
+            if batch_idx + 1 >= num_batches:
+                break
 
     return avg_loss, accuracy
 

@@ -52,6 +52,8 @@ class AsyncBatchNorm(torch.autograd.Function):
         dbeta = torch.sum(dy, dim=0)
         dgamma = torch.sum((input - mu) * (sigma2 + eps)**(-1. / 2.) * dy, dim=0)
 
+        print("test")
+
         return dx, dbeta, dgamma, None, None
 
 # inspired by https://zhuanlan.zhihu.com/p/31310177
@@ -68,7 +70,7 @@ class TrailingBatchNorm(torch.nn.Module):
         self.gamma = torch.Tensor([1.]).cuda()
         self.beta = torch.Tensor([0.]).cuda()
         self.eps = 1e-5
-        self.momentum = 0.5  # uses the same momentum definition as pytorch batchnorm
+        self.momentum = 0.9  # uses the same momentum definition as pytorch batchnorm
 
         self.first = 0
 
@@ -83,15 +85,11 @@ class TrailingBatchNorm(torch.nn.Module):
             self.running_mean = self.temp_running_mean
             self.running_variance = self.temp_running_variance
 
-        # if self.running_mean is None:
-        #     self.running_mean = torch.zeros(x.shape[1], dtype=x.dtype, requires_grad=False)
-        #     self.running_variance = torch.zeros(x.shape[1], dtype=x.dtype, requires_grad=False)
-
         async_batchnorm = AsyncBatchNorm.apply
         momentum = self.momentum
         eps = self.eps
 
-        if self.first < 782 * 3:
+        if self.first == 0:
             self.first += 1
             out = x
             if self.first == 1:
@@ -100,15 +98,20 @@ class TrailingBatchNorm(torch.nn.Module):
         else:
 #             x_normalized = (x - sample_mean) / torch.sqrt(sample_var + eps)
 #             out = gamma * x_normalized + beta
+            running_mean = self.running_mean.clone()
+            running_mean.requires_grad = True
 
-            out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
+            running_variance = self.running_variance.clone()
+            running_variance.requires_grad = True
+            out = async_batchnorm(x, self.beta, self.gamma, running_mean, running_variance)
 
-        with torch.no_grad():
-            sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
-            sample_var = torch.var(x, dim=0)
+        if x.requires_grad:
+            with torch.no_grad():
+                sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
+                sample_var = torch.var(x, dim=0)
 
-            self.temp_running_mean = (1 - momentum) * self.running_mean +  momentum * sample_mean
-            self.temp_running_variance = (1 - momentum) * self.running_variance + momentum * sample_var
+                self.temp_running_mean = (1 - momentum) * self.running_mean.detach() +  momentum * sample_mean
+                self.temp_running_variance = (1 - momentum) * self.running_variance.detach() + momentum * sample_var
 
         return out
 
