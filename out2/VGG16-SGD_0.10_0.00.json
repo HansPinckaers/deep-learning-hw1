@@ -1,0 +1,1 @@
+[{"model": "VGG16", "optimizer": {"name": "SGD", "params": {"lr": 0.1, "momentum": 0.0, "dampening": 0, "weight_decay": 0.0005, "nesterov": false}}, "train_loss": [[0, 1.6802097507145093], [1, 1.0896947807668116]], "train_acc": [[0, 37.802], [1, 61.028]], "test_loss": [[0, 1.8077021882503848], [1, 1.306977512715738]], "test_acc": [[0, 39.93], [1, 56.42]]}]

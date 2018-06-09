@@ -76,6 +76,7 @@ models = {
     'ResNet18_NBN': lambda: ResNet18_NBN(),
     'ResNet50_NBN': lambda: ResNet50_NBN(),
     'ResNet50_TBN': lambda: ResNet50_TBN(),
+    'ResNet50_BR': lambda: ResNet50_BR(),
     'PreActResNet18': lambda: PreActResNet18(),
     'GoogLeNet': lambda: GoogLeNet(),
     'DenseNet121': lambda: DenseNet121(),

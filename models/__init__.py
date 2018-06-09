@@ -10,6 +10,7 @@ from .shufflenet import *
 from .resnet import *
 from .resnet_nbn import *
 from .resnet_tbn import *
+from .resnet_brelu import *
 from .resnext import *
 from .preact_resnet import *
 from .mobilenet import *

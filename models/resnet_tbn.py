@@ -15,13 +15,13 @@ from torch.autograd import Variable
 class AsyncBatchNorm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, beta, gamma, r_mu, r_sigma2):
-        hath = (input - r_mu) * (r_sigma2 + 1e-5)**(-1./2.)
-        ctx.save_for_backward(input, beta, gamma)
+        hath = (input - 0.25*r_mu) / (0.1*torch.sqrt(r_sigma2) + 0.9)
+        ctx.save_for_backward(input, beta, gamma, 0.25*r_mu, 0.1*torch.sqrt(r_sigma2) + 0.9)
         return gamma * hath + beta
 
     @staticmethod
     def backward(ctx, grad_output):
-        input, beta, gamma = ctx.saved_tensors
+        input, beta, gamma, mu, sigma2 = ctx.saved_tensors
 
         dy = grad_output
         N = input.shape[0]
@@ -51,44 +51,19 @@ class TrailingBatchNorm(torch.nn.Module):
         self.gamma = torch.tensor([1.], requires_grad=True).cuda()
         self.beta = torch.tensor([0.], requires_grad=True).cuda()
         self.eps = 1e-5
-        self.momentum = 0.9  # uses the same momentum definition as pytorch batchnorm
+        self.momentum = 0.01 # uses the same momentum definition as pytorch batchnorm
 
         self.first = 0
 
     def forward(self, x):
-        if x.dim() == 4:
-            return self.batchnorm_forward_conv(x, self.gamma, self.beta)
-        else:
+        if x.dim() != 4:
             return self.batchnorm_forward(x, self.gamma, self.beta)
-
-    def batchnorm_forward_conv(self, x, gamma, beta):
-        if x.requires_grad:
-            self.running_mean = self.temp_running_mean
-            self.running_variance = self.temp_running_variance
-
-        x_chan = x.transpose(0, 1).contiguous().view(x.size(1), -1)
-
-        async_batchnorm = AsyncBatchNorm.apply
-        momentum = self.momentum
-
-        if self.first == 0:
-            self.first += 1
-            out = x
-            if self.first == 1:
-                self.running_mean = x_chan.mean(1)[:, None, None]
-                self.running_variance = x_chan.std(1)[:, None, None]
         else:
-            out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
-
-        if x.requires_grad:
-            with torch.no_grad():
-                sample_mean = x_chan.mean(1)[:, None, None]  # we do not need to calculate gradients over mean/var
-                sample_var = x_chan.std(1)[:, None, None]
-
-                self.temp_running_mean = (1 - momentum) * self.running_mean.detach() + momentum * sample_mean
-                self.temp_running_variance = (1 - momentum) * self.running_variance.detach() + momentum * sample_var
-
-        return out
+            N, C, H, W = x.shape
+            x_new = x.transpose(0, 1).contiguous().view(x.size(1), -1).transpose(0, 1)
+            out = self.batchnorm_forward(x_new, self.gamma, self.beta)
+            out = out.transpose(0, 1).view(C, N, H, W).transpose(0, 1)
+            return out
 
     def batchnorm_forward(self, x, gamma, beta):
         if x.requires_grad:
@@ -98,22 +73,54 @@ class TrailingBatchNorm(torch.nn.Module):
         async_batchnorm = AsyncBatchNorm.apply
         momentum = self.momentum
 
-        if self.first == 0:
+        if self.first < 10:
             self.first += 1
             out = x
             if self.first == 1:
-                self.running_mean = torch.mean(x, dim=0).detach()
-                self.running_variance = torch.var(x, dim=0).detach()
+                self.running_mean = torch.zeros((x.shape[1]), requires_grad=False).cuda()
+                self.running_variance = torch.ones((x.shape[1]), requires_grad=False).cuda()
         else:
-            out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
+            # if x.requires_grad:
+                # mean = torch.mean(x, dim=0).detach()
+                # variance = torch.var(x, dim=0).detach()
+
+            mean = self.running_mean
+            variance = self.running_variance
+
+            out = (x - 0.5*mean) / (0.5*torch.sqrt(variance) + 0.5)
+            out = out + self.beta
+
+                # out = async_batchnorm(x, self.beta, self.gamma, mean, variance)
+            # else:
+            #     out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
+
+            # sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
+            #    from pdb import set_trace; set_trace()
 
         if x.requires_grad:
             with torch.no_grad():
                 sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
                 sample_var = torch.var(x, dim=0)
+                if torch.sum(sample_mean == float("Inf")) > 0:
+                    return out
 
-                self.temp_running_mean = (1 - momentum) * self.running_mean.detach() + momentum * sample_mean
-                self.temp_running_variance = (1 - momentum) * self.running_variance.detach() + momentum * sample_var
+        #         N, C = x.shape
+        #         mu = 1/N * torch.sum(x, dim=0)  # Size (H,) maybe torch.mean is faster
+        #         sigma2 = 1/N * torch.sum((x - mu)**2, dim=0)  # Size (H,) maybe torch variance is faster
+
+        #         if torch.sum(mu != sample_mean) > 0:
+        #             print(x, torch.max(x, dim=0))
+
+        #         # if self.first > 45:
+        #         #     print(torch.mean(x))
+        #         #     print()
+        #         #     print()
+        #         summed = torch.sum(torch.abs((self.running_mean[0:3] - sample_mean[0:3]) / sample_mean[0:3]))
+        #         if summed > 0.1:
+        #             print(summed)
+
+                self.temp_running_mean = (1 - momentum) * self.running_mean + momentum * sample_mean
+                self.temp_running_variance = (1 - momentum) * self.running_variance + momentum * sample_var
 
         return out
 
