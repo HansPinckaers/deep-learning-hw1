@@ -31,7 +31,7 @@ def max_relu():
 
 brelu = _make_bipolar(F.relu)
 brelu = max_relu()
-# brelu = F.elu
+brelu = F.relu
 
 
 class AsyncBatchNorm(torch.autograd.Function):
@@ -125,8 +125,11 @@ class TrailingBatchNorm(torch.nn.Module):
 
         self.gamma = torch.tensor([1.], requires_grad=True).cuda()
         self.beta = torch.tensor([0.], requires_grad=True).cuda()
+
+        self.alpha = torch.tensor([0.2], requires_grad=True).cuda()
+        self.delta = torch.tensor([0.2], requires_grad=True).cuda()
         self.eps = 1e-5
-        self.momentum = 0.01  # uses the same momentum definition as pytorch batchnorm, 0.001 gives good results, but still unstable
+        self.momentum = 0.1  # uses the same momentum definition as pytorch batchnorm, 0.001 gives good results, but still unstable
 
         self.first = 0
 
@@ -151,13 +154,14 @@ class TrailingBatchNorm(torch.nn.Module):
             self.first = 1
             self.running_mean = torch.zeros((x.shape[1]), requires_grad=False).cuda()
             self.running_variance = torch.ones((x.shape[1]), requires_grad=False).cuda()
-            out = x
-        elif self.first > 25:
-            async_batchnorm = AsyncBatchNorm.apply
-            out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
-        else:
-            self.first += 1
-            out = x
+
+        #     out = x
+        # elif self.first > 25:
+        #     async_batchnorm = AsyncBatchNorm.apply
+        #     out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
+        # else:
+        #     self.first += 1
+        #     out = x
 
         # sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
         # sample_var = torch.var(x, dim=0)
@@ -165,8 +169,8 @@ class TrailingBatchNorm(torch.nn.Module):
         # mean = (1 - momentum) * self.running_mean + momentum * sample_mean
         # variance = (1 - momentum) * self.running_variance + momentum * sample_var
 
-        # out = (x - self.running_mean) / (torch.sqrt(self.running_variance))
-        # out = self.gamma * out + self.beta
+        out = (x - self.running_mean * self.alpha) / (torch.sqrt(self.running_variance) * self.delta + (1 - self.delta))
+        out = self.gamma * out + self.beta
 
         # else:
         #     out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
