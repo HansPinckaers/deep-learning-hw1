@@ -12,6 +12,26 @@ import torch.nn.functional as F
 
 from torch.autograd import Variable
 
+def _make_bipolar(fn):
+    def _fn(x, *args, **kwargs):
+        dim = 0 if x.dim() == 1 else 1
+        x0, x1 = torch.chunk(x, chunks=2, dim=dim)
+        y0 = fn(x0, *args, **kwargs)
+        y1 = -fn(-x1, *args, **kwargs)
+        return torch.cat((y0, y1), dim=dim)
+
+    return _fn
+
+def max_relu():
+    def _fn(x, *args, **kwargs):
+        return torch.clamp(x, min=-2, max=2)
+    return _fn
+
+brelu = _make_bipolar(F.relu)
+brelu = max_relu()
+brelu = F.elu
+
+
 class AsyncBatchNorm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, beta, gamma, r_mu, r_sigma2):
@@ -39,6 +59,61 @@ class AsyncBatchNorm(torch.autograd.Function):
         return dx, dbeta, dgamma, None, None
 
 # inspired by https://zhuanlan.zhihu.com/p/31310177
+class TileBatchNorm(torch.nn.Module):
+    def __init__(self, gamma=1., beta=0.):
+        super(TileBatchNorm, self).__init__()
+
+        self.running_mean = None
+
+        self.temp_running_mean = 0
+        self.temp_running_variance = 0
+
+        self.gamma = None
+        self.beta = None
+        self.eps = 1e-5
+        self.momentum = 0.1 # uses the same momentum definition as pytorch batchnorm
+
+        self.first = True
+
+    def forward(self, x):
+        if x.dim() == 4:
+            return self.batchnorm_forward(x, self.gamma, self.beta)
+        else:
+            return x
+
+    def batchnorm_forward(self, x, gamma, beta):
+        momentum = self.momentum
+
+        N, C, H, W = x.shape
+        tiles = 2
+        x_new = x.contiguous().view(x.size(0), x.size(1), tiles, -1).transpose(1, 2).contiguous().view(N, tiles, -1)
+
+        mean = torch.mean(x_new, dim=2)[:, :, None]
+        variance = torch.var(x_new, dim=2)[:, :, None]
+        out = (x_new - mean) / torch.sqrt(variance)
+        out = x_new.contiguous().view(N, tiles, x.size(1), x.size(2)*x.size(3) // tiles).transpose(2, 1).contiguous().view(N, C, H, W)
+        if self.gamma is None:
+            self.gamma = torch.ones((C), requires_grad=True).cuda()
+            self.beta = torch.zeros((C), requires_grad=True).cuda()
+        out *= self.gamma[None, :, None, None]
+        out += self.beta[None, :, None, None]
+        return out
+
+        G = 16
+
+        x = x.view(N,G,-1)
+        mean = x.mean(-1, keepdim=True)
+        var = x.var(-1, keepdim=True)
+
+        x = (x-mean) / (var+1e-5).sqrt()
+        if self.gamma is None:
+            self.gamma = torch.ones((C), requires_grad=True).cuda()
+            self.beta = torch.zeros((C), requires_grad=True).cuda()
+        x = x.view(N,C,H,W)
+        return x * self.gamma[None, :, None, None] + self.beta[None, :, None, None]
+
+
+# inspired by https://zhuanlan.zhihu.com/p/31310177
 class TrailingBatchNorm(torch.nn.Module):
     def __init__(self, gamma=1., beta=0.):
         super(TrailingBatchNorm, self).__init__()
@@ -51,11 +126,12 @@ class TrailingBatchNorm(torch.nn.Module):
         self.gamma = torch.tensor([1.], requires_grad=True).cuda()
         self.beta = torch.tensor([0.], requires_grad=True).cuda()
         self.eps = 1e-5
-        self.momentum = 0.01 # uses the same momentum definition as pytorch batchnorm
+        self.momentum = 0.001 # uses the same momentum definition as pytorch batchnorm
 
         self.first = 0
 
     def forward(self, x):
+        return x
         if x.dim() != 4:
             return self.batchnorm_forward(x, self.gamma, self.beta)
         else:
@@ -73,34 +149,39 @@ class TrailingBatchNorm(torch.nn.Module):
         async_batchnorm = AsyncBatchNorm.apply
         momentum = self.momentum
 
-        if self.first < 10:
-            self.first += 1
-            out = x
-            if self.first == 1:
-                self.running_mean = torch.zeros((x.shape[1]), requires_grad=False).cuda()
-                self.running_variance = torch.ones((x.shape[1]), requires_grad=False).cuda()
-        else:
-            # if x.requires_grad:
-                # mean = torch.mean(x, dim=0).detach()
-                # variance = torch.var(x, dim=0).detach()
+        # if self.first < 2:
+        #     self.first += 1
+        #     out = x
 
-            mean = self.running_mean
-            variance = self.running_variance
+        if self.first == 0:
+            self.first = 1
+            self.running_mean = torch.zeros((x.shape[1]), requires_grad=False).cuda()
+            self.running_variance = torch.ones((x.shape[1]), requires_grad=False).cuda()
 
-            out = (x - 0.5*mean) / (0.5*torch.sqrt(variance) + 0.5)
-            out = out + self.beta
+        # else:
+        # if x.requires_grad:
+            # mean = torch.mean(x, dim=0).detach()
+            # variance = torch.var(x, dim=0).detach()
 
-                # out = async_batchnorm(x, self.beta, self.gamma, mean, variance)
-            # else:
-            #     out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
+        mean = self.running_mean
+        variance = self.running_variance
 
-            # sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
-            #    from pdb import set_trace; set_trace()
+        # out = (x - 0.2*mean) / (0.2*torch.sqrt(variance) + 0.8)
+        out = (x - mean) / (torch.sqrt(variance))
+        # out = self.gamma * out + self.beta
+
+            # out = async_batchnorm(x, self.beta, self.gamma, mean, variance)
+        # else:
+        #     out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
+
+        # sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
+        #    from pdb import set_trace; set_trace()
 
         if x.requires_grad:
             with torch.no_grad():
                 sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
                 sample_var = torch.var(x, dim=0)
+
                 if torch.sum(sample_mean == float("Inf")) > 0:
                     return out
 
@@ -143,10 +224,10 @@ class BasicBlock_TBN(nn.Module):
             )
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
+        out = brelu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
-        out = F.relu(out)
+        out = brelu(out)
         return out
 
 
@@ -170,11 +251,11 @@ class Bottleneck_TBN(nn.Module):
             )
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = F.relu(self.bn2(self.conv2(out)))
+        out = brelu(self.bn1(self.conv1(x)))
+        out = brelu(self.bn2(self.conv2(out)))
         out = self.bn3(self.conv3(out))
         out += self.shortcut(x)
-        out = F.relu(out)
+        out = brelu(out)
         return out
 
 
@@ -200,7 +281,7 @@ class ResNet_TBN(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
+        out = brelu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
