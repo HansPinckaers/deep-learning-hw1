@@ -76,6 +76,7 @@ models = {
     'ResNet18_NBN': lambda: ResNet18_NBN(),
     'ResNet50_NBN': lambda: ResNet50_NBN(),
     'ResNet50_TBN': lambda: ResNet50_TBN(),
+    'ResNet18_TBN': lambda: ResNet18_TBN(),
     'ResNet50_BR': lambda: ResNet50_BR(),
     'PreActResNet18': lambda: PreActResNet18(),
     'GoogLeNet': lambda: GoogLeNet(),
@@ -104,7 +105,7 @@ if device == 'cuda':
         net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
-print(net)
+# print(net)
 
 # Load checkpoint
 checkpoint_filename = '%s/ckpt.%s.t7' % (CHECKPOINT_DIR, model_name)
@@ -129,7 +130,7 @@ optimizers = {
     'SGD': lambda: optim.SGD(net.parameters(),
                              lr=args.lr,
                              momentum=args.momentum,
-                             weight_decay=5e-4),
+                             weight_decay=5e-3),
     'Adam': lambda: optim.Adam(net.parameters(), lr=args.lr),
 }
 

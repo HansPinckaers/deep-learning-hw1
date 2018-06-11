@@ -12,6 +12,8 @@ import torch.nn.functional as F
 
 from torch.autograd import Variable
 
+torch.set_printoptions(precision=10)
+
 def _make_bipolar(fn):
     def _fn(x, *args, **kwargs):
         dim = 0 if x.dim() == 1 else 1
@@ -35,8 +37,8 @@ brelu = F.elu
 class AsyncBatchNorm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, beta, gamma, r_mu, r_sigma2):
-        hath = (input - 0.25*r_mu) / (0.1*torch.sqrt(r_sigma2) + 0.9)
-        ctx.save_for_backward(input, beta, gamma, 0.25*r_mu, 0.1*torch.sqrt(r_sigma2) + 0.9)
+        hath = (input - 0.25 * r_mu) / (0.1 * torch.sqrt(r_sigma2) + 0.9)
+        ctx.save_for_backward(input, beta, gamma, 0.25 * r_mu, 0.1 * torch.sqrt(r_sigma2) + 0.9)
         return gamma * hath + beta
 
     @staticmethod
@@ -47,11 +49,11 @@ class AsyncBatchNorm(torch.autograd.Function):
         N = input.shape[0]
         eps = 1e-5
 
-        mu = 1/N * torch.sum(input, dim=0)  # Size (H,) maybe torch.mean is faster
-        sigma2 = 1/N * torch.sum((input - mu)**2, dim=0)  # Size (H,) maybe torch variance is faster
+        mu = 1 / N * torch.sum(input, dim=0)  # Size (H,) maybe torch.mean is faster
+        sigma2 = 1 / N * torch.sum((input - mu)**2, dim=0)  # Size (H,) maybe torch variance is faster
 
-        dx = (1. / N) * gamma * (sigma2 + eps)**(-1. / 2.) * (N * dy - torch.sum(dy, dim=0)
-                - (input - mu) * (sigma2 + eps)**(-1.0) * torch.sum(dy * (input - mu), dim=0))
+        dx = (1. / N) * gamma * (sigma2 + eps)**(-1. / 2.) * \
+            (N * dy - torch.sum(dy, dim=0) - (input - mu) * (sigma2 + eps)**(-1.0) * torch.sum(dy * (input - mu), dim=0))
 
         dbeta = torch.sum(dy, dim=0)
         dgamma = torch.sum((input - mu) * (sigma2 + eps)**(-1. / 2.) * dy, dim=0)
@@ -71,7 +73,7 @@ class TileBatchNorm(torch.nn.Module):
         self.gamma = None
         self.beta = None
         self.eps = 1e-5
-        self.momentum = 0.1 # uses the same momentum definition as pytorch batchnorm
+        self.momentum = 0.5  # uses the same momentum definition as pytorch batchnorm
 
         self.first = True
 
@@ -82,8 +84,6 @@ class TileBatchNorm(torch.nn.Module):
             return x
 
     def batchnorm_forward(self, x, gamma, beta):
-        momentum = self.momentum
-
         N, C, H, W = x.shape
         tiles = 2
         x_new = x.contiguous().view(x.size(0), x.size(1), tiles, -1).transpose(1, 2).contiguous().view(N, tiles, -1)
@@ -91,7 +91,7 @@ class TileBatchNorm(torch.nn.Module):
         mean = torch.mean(x_new, dim=2)[:, :, None]
         variance = torch.var(x_new, dim=2)[:, :, None]
         out = (x_new - mean) / torch.sqrt(variance)
-        out = x_new.contiguous().view(N, tiles, x.size(1), x.size(2)*x.size(3) // tiles).transpose(2, 1).contiguous().view(N, C, H, W)
+        out = x_new.contiguous().view(N, tiles, x.size(1), x.size(2) * x.size(3) // tiles).transpose(2, 1).contiguous().view(N, C, H, W)
         if self.gamma is None:
             self.gamma = torch.ones((C), requires_grad=True).cuda()
             self.beta = torch.zeros((C), requires_grad=True).cuda()
@@ -101,15 +101,15 @@ class TileBatchNorm(torch.nn.Module):
 
         G = 16
 
-        x = x.view(N,G,-1)
+        x = x.view(N, G, -1)
         mean = x.mean(-1, keepdim=True)
         var = x.var(-1, keepdim=True)
 
-        x = (x-mean) / (var+1e-5).sqrt()
+        x = (x - mean) / (var + 1e-5).sqrt()
         if self.gamma is None:
             self.gamma = torch.ones((C), requires_grad=True).cuda()
             self.beta = torch.zeros((C), requires_grad=True).cuda()
-        x = x.view(N,C,H,W)
+        x = x.view(N, C, H, W)
         return x * self.gamma[None, :, None, None] + self.beta[None, :, None, None]
 
 
@@ -126,12 +126,11 @@ class TrailingBatchNorm(torch.nn.Module):
         self.gamma = torch.tensor([1.], requires_grad=True).cuda()
         self.beta = torch.tensor([0.], requires_grad=True).cuda()
         self.eps = 1e-5
-        self.momentum = 0.001 # uses the same momentum definition as pytorch batchnorm
+        self.momentum = 0.1  # uses the same momentum definition as pytorch batchnorm, 0.001 gives good results, but still unstable
 
         self.first = 0
 
     def forward(self, x):
-        return x
         if x.dim() != 4:
             return self.batchnorm_forward(x, self.gamma, self.beta)
         else:
@@ -146,36 +145,27 @@ class TrailingBatchNorm(torch.nn.Module):
             self.running_mean = self.temp_running_mean
             self.running_variance = self.temp_running_variance
 
-        async_batchnorm = AsyncBatchNorm.apply
         momentum = self.momentum
 
-        # if self.first < 2:
-        #     self.first += 1
-        #     out = x
-
         if self.first == 0:
-            self.first = 1
             self.running_mean = torch.zeros((x.shape[1]), requires_grad=False).cuda()
             self.running_variance = torch.ones((x.shape[1]), requires_grad=False).cuda()
 
-        # else:
-        # if x.requires_grad:
-            # mean = torch.mean(x, dim=0).detach()
-            # variance = torch.var(x, dim=0).detach()
+        # sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
+        # sample_var = torch.var(x, dim=0)
 
-        mean = self.running_mean
-        variance = self.running_variance
+        # mean = (1 - momentum) * self.running_mean + momentum * sample_mean
+        # variance = (1 - momentum) * self.running_variance + momentum * sample_var
 
-        # out = (x - 0.2*mean) / (0.2*torch.sqrt(variance) + 0.8)
-        out = (x - mean) / (torch.sqrt(variance))
+        out = (x - self.running_mean) / (torch.sqrt(self.running_variance))
+
         # out = self.gamma * out + self.beta
 
-            # out = async_batchnorm(x, self.beta, self.gamma, mean, variance)
+        # out = async_batchnorm(x, self.beta, self.gamma, mean, variance)
         # else:
         #     out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
 
         # sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
-        #    from pdb import set_trace; set_trace()
 
         if x.requires_grad:
             with torch.no_grad():
@@ -199,7 +189,7 @@ class TrailingBatchNorm(torch.nn.Module):
         #         summed = torch.sum(torch.abs((self.running_mean[0:3] - sample_mean[0:3]) / sample_mean[0:3]))
         #         if summed > 0.1:
         #             print(summed)
-
+                # print("sample", sample_mean[0:2])
                 self.temp_running_mean = (1 - momentum) * self.running_mean + momentum * sample_mean
                 self.temp_running_variance = (1 - momentum) * self.running_variance + momentum * sample_var
 
@@ -217,9 +207,9 @@ class BasicBlock_TBN(nn.Module):
         self.bn2 = TrailingBatchNorm()
 
         self.shortcut = nn.Sequential()
-        if stride != 1 or in_planes != self.expansion*planes:
+        if stride != 1 or in_planes != self.expansion * planes:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
+                nn.Conv2d(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
                 TrailingBatchNorm()
             )
 
@@ -240,17 +230,18 @@ class Bottleneck_TBN(nn.Module):
         self.bn1 = TrailingBatchNorm()
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn2 = TrailingBatchNorm()
-        self.conv3 = nn.Conv2d(planes, self.expansion*planes, kernel_size=1, bias=False)
+        self.conv3 = nn.Conv2d(planes, self.expansion * planes, kernel_size=1, bias=False)
         self.bn3 = TrailingBatchNorm()
 
         self.shortcut = nn.Sequential()
-        if stride != 1 or in_planes != self.expansion*planes:
+        if stride != 1 or in_planes != self.expansion * planes:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
+                nn.Conv2d(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
                 TrailingBatchNorm()
             )
 
     def forward(self, x):
+        # print(self.conv1.weight.data)
         out = brelu(self.bn1(self.conv1(x)))
         out = brelu(self.bn2(self.conv2(out)))
         out = self.bn3(self.conv3(out))
@@ -270,10 +261,10 @@ class ResNet_TBN(nn.Module):
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
-        self.linear = nn.Linear(512*block.expansion, num_classes)
+        self.linear = nn.Linear(512 * block.expansion, num_classes)
 
     def _make_layer(self, block, planes, num_blocks, stride):
-        strides = [stride] + [1]*(num_blocks-1)
+        strides = [stride] + [1] * (num_blocks - 1)
         layers = []
         for stride in strides:
             layers.append(block(self.in_planes, planes, stride))
@@ -293,24 +284,24 @@ class ResNet_TBN(nn.Module):
 
 
 def ResNet18_TBN():
-    return ResNet_TBN(BasicBlock_TBN, [2,2,2,2])
+    return ResNet_TBN(BasicBlock_TBN, [2, 2, 2, 2])
 
 def ResNet34_TBN():
-    return ResNet_TBN(BasicBlock_TBN, [3,4,6,3])
+    return ResNet_TBN(BasicBlock_TBN, [3, 4, 6, 3])
 
 def ResNet50_TBN():
-    return ResNet_TBN(Bottleneck_TBN, [3,4,6,3])
+    return ResNet_TBN(Bottleneck_TBN, [3, 4, 6, 3])
 
 def ResNet101_TBN():
-    return ResNet_TBN(Bottleneck_TBN, [3,4,23,3])
+    return ResNet_TBN(Bottleneck_TBN, [3, 4, 23, 3])
 
 def ResNet152_TBN():
-    return ResNet_TBN(Bottleneck_TBN, [3,8,36,3])
+    return ResNet_TBN(Bottleneck_TBN, [3, 8, 36, 3])
 
 
 def test():
     net = ResNet18_TBN()
-    y = net(Variable(torch.randn(1,3,32,32)))
+    y = net(Variable(torch.randn(1, 3, 32, 32)))
     print(y.size())
 
 # test()
