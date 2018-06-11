@@ -130,7 +130,7 @@ optimizers = {
     'SGD': lambda: optim.SGD(net.parameters(),
                              lr=args.lr,
                              momentum=args.momentum,
-                             weight_decay=5e-3),
+                             weight_decay=5e-5),
     'Adam': lambda: optim.Adam(net.parameters(), lr=args.lr),
 }
 

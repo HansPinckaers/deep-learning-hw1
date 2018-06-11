@@ -31,15 +31,15 @@ def max_relu():
 
 brelu = _make_bipolar(F.relu)
 brelu = max_relu()
-brelu = F.elu
+# brelu = F.elu
 
 
 class AsyncBatchNorm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, beta, gamma, r_mu, r_sigma2):
-        hath = (input - 0.25 * r_mu) / (0.1 * torch.sqrt(r_sigma2) + 0.9)
-        ctx.save_for_backward(input, beta, gamma, 0.25 * r_mu, 0.1 * torch.sqrt(r_sigma2) + 0.9)
-        return gamma * hath + beta
+        hath = (input - r_mu) / (torch.sqrt(r_sigma2))
+        ctx.save_for_backward(input, beta, gamma, r_mu, torch.sqrt(r_sigma2))
+        return hath
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -49,8 +49,8 @@ class AsyncBatchNorm(torch.autograd.Function):
         N = input.shape[0]
         eps = 1e-5
 
-        mu = 1 / N * torch.sum(input, dim=0)  # Size (H,) maybe torch.mean is faster
-        sigma2 = 1 / N * torch.sum((input - mu)**2, dim=0)  # Size (H,) maybe torch variance is faster
+        # mu = 1 / N * torch.sum(input, dim=0)  # Size (H,) maybe torch.mean is faster
+        # sigma2 = 1 / N * torch.sum((input - mu)**2, dim=0)  # Size (H,) maybe torch variance is faster
 
         dx = (1. / N) * gamma * (sigma2 + eps)**(-1. / 2.) * \
             (N * dy - torch.sum(dy, dim=0) - (input - mu) * (sigma2 + eps)**(-1.0) * torch.sum(dy * (input - mu), dim=0))
@@ -126,7 +126,7 @@ class TrailingBatchNorm(torch.nn.Module):
         self.gamma = torch.tensor([1.], requires_grad=True).cuda()
         self.beta = torch.tensor([0.], requires_grad=True).cuda()
         self.eps = 1e-5
-        self.momentum = 0.1  # uses the same momentum definition as pytorch batchnorm, 0.001 gives good results, but still unstable
+        self.momentum = 0.01  # uses the same momentum definition as pytorch batchnorm, 0.001 gives good results, but still unstable
 
         self.first = 0
 
@@ -148,8 +148,16 @@ class TrailingBatchNorm(torch.nn.Module):
         momentum = self.momentum
 
         if self.first == 0:
+            self.first = 1
             self.running_mean = torch.zeros((x.shape[1]), requires_grad=False).cuda()
             self.running_variance = torch.ones((x.shape[1]), requires_grad=False).cuda()
+            out = x
+        elif self.first > 25:
+            async_batchnorm = AsyncBatchNorm.apply
+            out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
+        else:
+            self.first += 1
+            out = x
 
         # sample_mean = torch.mean(x, dim=0)  # we do not need to calculate gradients over mean/var
         # sample_var = torch.var(x, dim=0)
@@ -157,11 +165,9 @@ class TrailingBatchNorm(torch.nn.Module):
         # mean = (1 - momentum) * self.running_mean + momentum * sample_mean
         # variance = (1 - momentum) * self.running_variance + momentum * sample_var
 
-        out = (x - self.running_mean) / (torch.sqrt(self.running_variance))
-
+        # out = (x - self.running_mean) / (torch.sqrt(self.running_variance))
         # out = self.gamma * out + self.beta
 
-        # out = async_batchnorm(x, self.beta, self.gamma, mean, variance)
         # else:
         #     out = async_batchnorm(x, self.beta, self.gamma, self.running_mean, self.running_variance)
 
@@ -190,6 +196,7 @@ class TrailingBatchNorm(torch.nn.Module):
         #         if summed > 0.1:
         #             print(summed)
                 # print("sample", sample_mean[0:2])
+
                 self.temp_running_mean = (1 - momentum) * self.running_mean + momentum * sample_mean
                 self.temp_running_variance = (1 - momentum) * self.running_variance + momentum * sample_var
 
