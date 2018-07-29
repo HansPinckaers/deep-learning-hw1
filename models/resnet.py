@@ -19,15 +19,16 @@ class RandomZeroPadding(torch.nn.Module):
 
     def forward(self, input):
         padding = self.padding
-
         def pad_rows(arr, prev_mask=None):
-            mask = torch.ones((input.shape[1], input.shape[2], input.shape[3] + padding * 2),
-                              requires_grad=False, dtype=torch.uint8).cuda()
-            mask[:, :, 0:padding * 2] = 0  # set first two columns on zero
-            # Randomize zeroes per row
-            n_cols = mask.shape[2]
-            for i in range(mask.shape[1]):
-                mask[:, i] = mask[:, i, torch.randperm(n_cols)]
+            mask = torch.ones((input.shape[1], input.shape[2], input.shape[3] + padding * 2), 
+                                  requires_grad=False, dtype=torch.uint8).cuda()
+            for c in range(input.shape[1]):
+                mask[c, :, 0:padding * 2] = 0  # set first two columns on zero, 
+                # Randomize zeroes per row
+                n_cols = mask.shape[2]
+                for i in range(mask.shape[1]):
+                    mask[c, i] = mask[c, i, torch.randperm(n_cols)]
+
             output = torch.zeros(input.shape[0], input.shape[1], input.shape[2],
                                  input.shape[3] + padding * 2, dtype=input.dtype).cuda()
             output.masked_scatter_(mask, input)
